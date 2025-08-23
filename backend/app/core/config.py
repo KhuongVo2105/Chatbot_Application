@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     # MongoDB
     MONGO_URI: str = "mongodb://localhost:27017"
@@ -31,10 +32,12 @@ class Settings(BaseSettings):
     HUGGING_FACE_API_KEY: str
     HUGGING_FACE_MODEL_ID: str = "deepseek-ai/DeepSeek-V3-0324"
 
-    RAG_JSON_DATA: str = "app/assets/all_vector_data.json"
+    RAG_JSON_DATA: str = "./all_vector_data.json"
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-    FAISS_INDEX_PATH: str = "app/assets/all_vector_index.faiss"
+    FAISS_INDEX_PATH: str = "./all_vector_index.faiss"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding='utf-8')
+
 
 settings = Settings()

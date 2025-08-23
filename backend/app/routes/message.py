@@ -122,10 +122,15 @@ async def create_message_with_rag(message_data: MessageCreate, current_user: Use
 async def create_raw_message(message_data: MessageCreate, current_user: User = Depends(get_current_user)):
     """ Create a new raw message in a conversation without RAG processing.
     """
-    conversation = await Conversation.find_one(Conversation.id == message_data.conversation_id, Conversation.user.id == current_user.id)
+    conversation = await Conversation.find_one(
+        Conversation.id == message_data.conversation_id,
+        Conversation.user.id == current_user.id
+    )
     if not conversation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Conversation not found or you don't have permission")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or you don't have permission"
+        )
 
     try:
         completion = client.chat.completions.create(
@@ -134,25 +139,44 @@ async def create_raw_message(message_data: MessageCreate, current_user: User = D
                 {"role": "user", "content": message_data.content}
             ],
         )
-
         chatbot_response_content = completion.choices[0].message.content
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Failed to get response from chatbot: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get response from chatbot: {e}"
+        )
 
-    new_bot_message = Message(conversation=conversation.id,
-                              sender_type="Bot", content=chatbot_response_content)
+    new_bot_message = Message(
+        conversation=conversation.id,
+        sender_type="Bot",
+        content=chatbot_response_content
+    )
     await new_bot_message.insert()
     await conversation.update_last_updated()
-    return Response(status_code=status.HTTP_201_CREATED, message="Raw message created successfully with bot response", data=new_bot_message)
+    return Response(
+        status_code=status.HTTP_201_CREATED,
+        message="Raw message created successfully with bot response",
+        data=new_bot_message
+    )
 
 
-@route.post("raw-model/", status_code=status.HTTP_201_CREATED, response_model=Response[MessageOut])
-async def create_raw_message_with_model(message_data: MessageCreate, current_user: User = Depends):
-    conversation = await Conversation.find_one(Conversation.id == message_data.conversation_id, Conversation.user.id == current_user.id)
+# FIX: add leading slash
+@route.post("/raw-model/", status_code=status.HTTP_201_CREATED, response_model=Response[MessageOut])
+async def create_raw_message_with_model(
+    message_data: MessageCreate,
+    # FIX: pass the dependency callable
+    current_user: User = Depends(get_current_user)
+):
+    """ Create a new raw message using the 'raw_client' model. """
+    conversation = await Conversation.find_one(
+        Conversation.id == message_data.conversation_id,
+        Conversation.user.id == current_user.id
+    )
     if not conversation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Conversation not found or you don't have permission")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or you don't have permission"
+        )
 
     try:
         completion = raw_client.chat.completions.create(
@@ -161,17 +185,25 @@ async def create_raw_message_with_model(message_data: MessageCreate, current_use
                 {"role": "user", "content": message_data.content}
             ],
         )
-
         chatbot_response_content = completion.choices[0].message.content
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Failed to get response from chatbot: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get response from chatbot: {e}"
+        )
 
-    new_bot_message = Message(conversation=conversation.id,
-                              sender_type="Bot", content=chatbot_response_content)
+    new_bot_message = Message(
+        conversation=conversation.id,
+        sender_type="Bot",
+        content=chatbot_response_content
+    )
     await new_bot_message.insert()
     await conversation.update_last_updated()
-    return Response(status_code=status.HTTP_201_CREATED, message="Raw message created successfully with raw bot response", data=new_bot_message)
+    return Response(
+        status_code=status.HTTP_201_CREATED,
+        message="Raw message created successfully with raw bot response",
+        data=new_bot_message
+    )
 
 
 @route.delete("/{message_id}", response_model=Response)
