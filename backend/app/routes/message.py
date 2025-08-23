@@ -110,7 +110,8 @@ async def create_message_with_rag(message_data: MessageCreate, current_user: Use
                             detail=f"Failed to get response from chatbot: {e}")
 
     new_bot_message = Message(conversation=conversation.id,
-                              sender_type="Bot", content=chatbot_response_content)
+                              sender_type="Bot",
+                              content="RAG + fine-tuned models : " + chatbot_response_content)
     await new_bot_message.insert()
 
     await conversation.update_last_updated()
@@ -149,7 +150,7 @@ async def create_raw_message(message_data: MessageCreate, current_user: User = D
     new_bot_message = Message(
         conversation=conversation.id,
         sender_type="Bot",
-        content=chatbot_response_content
+        content="fine-tuned models : " + chatbot_response_content
     )
     await new_bot_message.insert()
     await conversation.update_last_updated()
@@ -195,7 +196,7 @@ async def create_raw_message_with_model(
     new_bot_message = Message(
         conversation=conversation.id,
         sender_type="Bot",
-        content=chatbot_response_content
+        content="raw-model : " + chatbot_response_content
     )
     await new_bot_message.insert()
     await conversation.update_last_updated()

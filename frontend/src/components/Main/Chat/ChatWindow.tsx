@@ -146,13 +146,18 @@ const ChatWindow = ({ setIsLoading, currentConversation, onConversationCreated }
                 content: content,
             }).unwrap();
 
-            setMessages(prev => {
-                const hasServerAlready = prev.some(m => m.id === serverMsg.id);
-                let updated = prev.filter(m => !(m.pending && m.clientId === clientTempId));
+            const { rag, raw, rawModel } = serverMsg;
 
-                if (!hasServerAlready) {
-                    updated = [...updated, { ...serverMsg } as LocalMessage];
-                }
+            setMessages(prev => {
+                const updated = prev.filter(m => !(m.pending && m.clientId === clientTempId));
+
+                // Only add if not already present
+                [rag, raw, rawModel].forEach(msg => {
+                    if (!updated.some(m => m.id === msg.id)) {
+                        updated.push({ ...msg } as LocalMessage);
+                    }
+                });
+
                 updated.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
                 return updated;
             });
