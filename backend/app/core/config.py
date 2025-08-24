@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     # MongoDB
     MONGO_URI: str = "mongodb://localhost:27017"
@@ -35,6 +36,8 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     FAISS_INDEX_PATH: str = "app/assets/all_vector_index.faiss"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding='utf-8')
+
 
 settings = Settings()
