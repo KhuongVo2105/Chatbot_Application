@@ -4,8 +4,6 @@ import { create } from "domain";
 
 type CreateAllResult = {
   rag: Message;
-  raw: Message;
-  rawModel: Message;
 };
 
 export const messageApi = createApi({
@@ -86,16 +84,12 @@ export const messageApi = createApi({
 
         const requests = [
           baseQuery({ url: "/messages/", method: "POST", body: payload, signal }),          // rag
-          baseQuery({ url: "/messages/raw/", method: "POST", body: payload, signal }),      // raw
-          baseQuery({ url: "/messages/raw-model/", method: "POST", body: payload, signal }),// rawModel
         ] as const;
 
-        const [ragRes, rawRes, rawModelRes] = await Promise.all(requests);
+        const [ragRes] = await Promise.all(requests);
 
         // bubble the first error encountered
         if ("error" in ragRes && ragRes.error) return { error: ragRes.error };
-        if ("error" in rawRes && rawRes.error) return { error: rawRes.error };
-        if ("error" in rawModelRes && rawModelRes.error) return { error: rawModelRes.error };
 
         const toMessage = (resp: any): Message => {
           const msg = resp.data;
@@ -110,8 +104,6 @@ export const messageApi = createApi({
 
         const data: CreateAllResult = {
           rag: toMessage((ragRes as any).data),
-          raw: toMessage((rawRes as any).data),
-          rawModel: toMessage((rawModelRes as any).data),
         };
 
         return { data };

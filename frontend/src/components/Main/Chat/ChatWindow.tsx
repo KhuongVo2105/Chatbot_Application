@@ -146,13 +146,13 @@ const ChatWindow = ({ setIsLoading, currentConversation, onConversationCreated }
                 content: content,
             }).unwrap();
 
-            const { rag, raw, rawModel } = serverMsg;
+            const { rag } = serverMsg;
 
             setMessages(prev => {
                 const updated = prev.filter(m => !(m.pending && m.clientId === clientTempId));
 
                 // Only add if not already present
-                [rag, raw, rawModel].forEach(msg => {
+                [rag].forEach(msg => {
                     if (!updated.some(m => m.id === msg.id)) {
                         updated.push({ ...msg } as LocalMessage);
                     }
