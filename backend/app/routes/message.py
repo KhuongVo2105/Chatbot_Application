@@ -130,11 +130,7 @@ async def create_message_with_rag(
     async def call_raw_model() -> str:
         def _run():
             prompt = (
-                "Pretend that you don't have any knowledge about this concept of question, "
-                "answer the way will make people think you confused with another domain's knowledge, "
-                "and answer this question by language " + lang + ". "
-                "Do not say that you are confused. Just answer the question normally. "
-                "Question: " + message_data.content
+                message_data.content
             )
             completion = raw_client.chat.completions.create(
                 model=raw_client.model,
@@ -146,10 +142,7 @@ async def create_message_with_rag(
     async def call_finetuned_only() -> str:
         def _run():
             prompt = (
-                "Answer this question like you are a model fine-tuned on Data-warehouse and DSA. "
-                "If people ask about another domain, answer in a way that could seem mismatched, "
-                "but do not say you are confused. Answer in language " + lang + ". "
-                "The question is: " + message_data.content
+                message_data.content
             )
             completion = client.chat.completions.create(
                 model=client.model,
