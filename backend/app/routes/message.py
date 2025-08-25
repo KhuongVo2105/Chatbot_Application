@@ -10,6 +10,7 @@ from app.routes.user import get_current_user
 from app.core.response import Response
 from app.core.config import settings
 from app.rag.rag_module import rag as rag_instance
+from app.rag.lang_detector import detect_language
 
 route = APIRouter(
     prefix="/messages",
@@ -133,11 +134,19 @@ async def create_raw_message(message_data: MessageCreate, current_user: User = D
             detail="Conversation not found or you don't have permission"
         )
 
+    new_user_message = Message(**message_data.model_dump(
+        exclude={"conversation_id"}), conversation=conversation.id, sender_type="User")
+    await new_user_message.insert()
+
+    lang = detect_language(message_data.content)
+
     try:
         completion = client.chat.completions.create(
             model=client.model,
             messages=[
-                {"role": "user", "content": message_data.content}
+                {"role": "user", "content": "Answer this question likes you are the model that was fine-tuned by" +
+                 " knowledge about Data-warehouse and DSA. If people ask you about another domain just answer the way will make people think you confused with another domain's knowledge but do not say that you are confused . Answer this question by language"
+                 + lang + ".The question is:" + message_data.content}
             ],
         )
         chatbot_response_content = completion.choices[0].message.content
@@ -179,11 +188,19 @@ async def create_raw_message_with_model(
             detail="Conversation not found or you don't have permission"
         )
 
+    new_user_message = Message(**message_data.model_dump(
+        exclude={"conversation_id"}), conversation=conversation.id, sender_type="User")
+    await new_user_message.insert()
+
+    lang = detect_language(message_data.content)
+
     try:
         completion = raw_client.chat.completions.create(
             model=raw_client.model,
             messages=[
-                {"role": "user", "content": message_data.content}
+                {"role": "user", "content": "Pretend that you don't have any knowledge about this concept of question," +
+                 "answer the way will make people think you confused with another domain's knowledge, and answer this question by language. but do not say that you are confused. Just answer the question normally."
+                 + lang + ".Question :" + message_data.content}
             ],
         )
         chatbot_response_content = completion.choices[0].message.content
