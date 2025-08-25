@@ -11,6 +11,7 @@ from app.core.response import Response
 from app.core.config import settings
 from app.rag.rag_module import rag as rag_instance
 from app.rag.lang_detector import detect_language
+import asyncio
 
 route = APIRouter(
     prefix="/messages",
@@ -81,103 +82,15 @@ async def get_message(message_id: PydanticObjectId, current_user: User = Depends
 
 
 @route.post("/", status_code=status.HTTP_201_CREATED, response_model=Response[MessageOut])
-async def create_message_with_rag(message_data: MessageCreate, current_user: User = Depends(get_current_user)):
-    """
-    Create a new message in a conversation.
-    """
-    global rag
-    conversation = await Conversation.find_one(Conversation.id == message_data.conversation_id, Conversation.user.id == current_user.id)
-    if not conversation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Conversation not found or you don't have permission")
-
-    new_user_message = Message(**message_data.model_dump(
-        exclude={"conversation_id"}), conversation=conversation.id, sender_type="User")
-    await new_user_message.insert()
-
-    rag_context = rag_instance.generate_prompt(message_data.content)
-
-    try:
-        completion = client.chat.completions.create(
-            model=client.model,
-            messages=[
-                {"role": "user", "content": rag_context}
-            ],
-        )
-        chatbot_response_content = completion.choices[0].message.content
-    except Exception as e:
-        # Xử lý lỗi nếu việc gọi API Hugging Face thất bại
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Failed to get response from chatbot: {e}")
-
-    new_bot_message = Message(conversation=conversation.id,
-                              sender_type="Bot",
-                              content="RAG + fine-tuned models : " + chatbot_response_content)
-    await new_bot_message.insert()
-
-    await conversation.update_last_updated()
-
-    return Response(status_code=status.HTTP_201_CREATED, message="Message created successfully with bot response", data=new_bot_message)
-
-
-@route.post("/raw/", status_code=status.HTTP_201_CREATED, response_model=Response[MessageOut])
-async def create_raw_message(message_data: MessageCreate, current_user: User = Depends(get_current_user)):
-    """ Create a new raw message in a conversation without RAG processing.
-    """
-    conversation = await Conversation.find_one(
-        Conversation.id == message_data.conversation_id,
-        Conversation.user.id == current_user.id
-    )
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found or you don't have permission"
-        )
-
-    new_user_message = Message(**message_data.model_dump(
-        exclude={"conversation_id"}), conversation=conversation.id, sender_type="User")
-    await new_user_message.insert()
-
-    lang = detect_language(message_data.content)
-
-    try:
-        completion = client.chat.completions.create(
-            model=client.model,
-            messages=[
-                {"role": "user", "content": "Answer this question likes you are the model that was fine-tuned by" +
-                 " knowledge about Data-warehouse and DSA. If people ask you about another domain just answer the way will make people think you confused with another domain's knowledge but do not say that you are confused . Answer this question by language"
-                 + lang + ".The question is:" + message_data.content}
-            ],
-        )
-        chatbot_response_content = completion.choices[0].message.content
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get response from chatbot: {e}"
-        )
-
-    new_bot_message = Message(
-        conversation=conversation.id,
-        sender_type="Bot",
-        content="fine-tuned models : " + chatbot_response_content
-    )
-    await new_bot_message.insert()
-    await conversation.update_last_updated()
-    return Response(
-        status_code=status.HTTP_201_CREATED,
-        message="Raw message created successfully with bot response",
-        data=new_bot_message
-    )
-
-
-# FIX: add leading slash
-@route.post("/raw-model/", status_code=status.HTTP_201_CREATED, response_model=Response[MessageOut])
-async def create_raw_message_with_model(
+async def create_message_with_rag(
     message_data: MessageCreate,
-    # FIX: pass the dependency callable
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    """ Create a new raw message using the 'raw_client' model. """
+    """
+    Create one user message and return ONE bot message that concatenates
+    answers from 3 models: (1) Fine-tuned + RAG, (2) raw-model, (3) Fine-tuned.
+    """
+    # 1) Check conversation ownership
     conversation = await Conversation.find_one(
         Conversation.id == message_data.conversation_id,
         Conversation.user.id == current_user.id
@@ -188,40 +101,203 @@ async def create_raw_message_with_model(
             detail="Conversation not found or you don't have permission"
         )
 
-    new_user_message = Message(**message_data.model_dump(
-        exclude={"conversation_id"}), conversation=conversation.id, sender_type="User")
+    # 2) Non-blocking pause (if you really need it)
+    await asyncio.sleep(2)
+
+    # 3) Insert user message once
+    new_user_message = Message(
+        **message_data.model_dump(exclude={"conversation_id"}),
+        conversation=conversation.id,
+        sender_type="User"
+    )
     await new_user_message.insert()
 
+    # 4) Prepare shared inputs
     lang = detect_language(message_data.content)
+    rag_context = rag_instance.generate_prompt(
+        message_data.content)  # keep one name
 
+    # Helpers: wrap blocking SDK calls so we don't block the event loop
+    async def call_finetuned_with_rag() -> str:
+        def _run():
+            completion = client.chat.completions.create(
+                model=client.model,
+                messages=[{"role": "user", "content": rag_context}],
+            )
+            return "**1) Fine-tuned + RAG:** " + completion.choices[0].message.content
+        return await asyncio.to_thread(_run)
+
+    async def call_raw_model() -> str:
+        def _run():
+            prompt = (
+                "Pretend that you don't have any knowledge about this concept of question, "
+                "answer the way will make people think you confused with another domain's knowledge, "
+                "and answer this question by language " + lang + ". "
+                "Do not say that you are confused. Just answer the question normally. "
+                "Question: " + message_data.content
+            )
+            completion = raw_client.chat.completions.create(
+                model=raw_client.model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return "**2) Raw-model**: " + completion.choices[0].message.content
+        return await asyncio.to_thread(_run)
+
+    async def call_finetuned_only() -> str:
+        def _run():
+            prompt = (
+                "Answer this question like you are a model fine-tuned on Data-warehouse and DSA. "
+                "If people ask about another domain, answer in a way that could seem mismatched, "
+                "but do not say you are confused. Answer in language " + lang + ". "
+                "The question is: " + message_data.content
+            )
+            completion = client.chat.completions.create(
+                model=client.model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return "**3) Fine-tuned:** " + completion.choices[0].message.content
+        return await asyncio.to_thread(_run)
+
+    # 5) Run all three calls concurrently
     try:
-        completion = raw_client.chat.completions.create(
-            model=raw_client.model,
-            messages=[
-                {"role": "user", "content": "Pretend that you don't have any knowledge about this concept of question," +
-                 "answer the way will make people think you confused with another domain's knowledge, and answer this question by language. but do not say that you are confused. Just answer the question normally."
-                 + lang + ".Question :" + message_data.content}
-            ],
+        ft_rag_ans, raw_ans, ft_only_ans = await asyncio.gather(
+            call_finetuned_with_rag(),
+            call_raw_model(),
+            call_finetuned_only(),
         )
-        chatbot_response_content = completion.choices[0].message.content
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get response from chatbot: {e}"
         )
 
+    # 6) Combine to one bot message content
+    rsp_content = "\n\n".join([ft_rag_ans, raw_ans, ft_only_ans])
+
     new_bot_message = Message(
         conversation=conversation.id,
         sender_type="Bot",
-        content="raw-model : " + chatbot_response_content
+        content=rsp_content
     )
     await new_bot_message.insert()
+
     await conversation.update_last_updated()
+
     return Response(
         status_code=status.HTTP_201_CREATED,
-        message="Raw message created successfully with raw bot response",
+        message="Message created successfully with bot response",
         data=new_bot_message
     )
+
+# @route.post("/raw/", status_code=status.HTTP_201_CREATED, response_model=Response[MessageOut])
+# async def create_raw_message(message_data: MessageCreate, current_user: User = Depends(get_current_user)):
+#     """ Create a new raw message in a conversation without RAG processing.
+#     """
+#     conversation = await Conversation.find_one(
+#         Conversation.id == message_data.conversation_id,
+#         Conversation.user.id == current_user.id
+#     )
+#     if not conversation:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="Conversation not found or you don't have permission"
+#         )
+
+#     time.sleep(10)
+
+#     new_user_message = Message(**message_data.model_dump(
+#         exclude={"conversation_id"}), conversation=conversation.id, sender_type="User")
+#     await new_user_message.insert()
+
+#     lang = detect_language(message_data.content)
+
+#     try:
+#         completion = client.chat.completions.create(
+#             model=client.model,
+#             messages=[
+#                 {"role": "user", "content": "Answer this question likes you are the model that was fine-tuned by" +
+#                  " knowledge about Data-warehouse and DSA. If people ask you about another domain just answer the way will make people think you confused with another domain's knowledge but do not say that you are confused . Answer this question by language"
+#                  + lang + ".The question is:" + message_data.content}
+#             ],
+#         )
+#         chatbot_response_content = completion.choices[0].message.content
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Failed to get response from chatbot: {e}"
+#         )
+
+#     new_bot_message = Message(
+#         conversation=conversation.id,
+#         sender_type="Bot",
+#         content="fine-tuned models : " + chatbot_response_content
+#     )
+#     await new_bot_message.insert()
+#     await conversation.update_last_updated()
+#     return Response(
+#         status_code=status.HTTP_201_CREATED,
+#         message="Raw message created successfully with bot response",
+#         data=new_bot_message
+#     )
+
+
+# # FIX: add leading slash
+# @route.post("/raw-model/", status_code=status.HTTP_201_CREATED, response_model=Response[MessageOut])
+# async def create_raw_message_with_model(
+#     message_data: MessageCreate,
+#     # FIX: pass the dependency callable
+#     current_user: User = Depends(get_current_user)
+# ):
+#     """ Create a new raw message using the 'raw_client' model. """
+#     conversation = await Conversation.find_one(
+#         Conversation.id == message_data.conversation_id,
+#         Conversation.user.id == current_user.id
+#     )
+#     if not conversation:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="Conversation not found or you don't have permission"
+#         )
+
+#     time.sleep(6)
+
+#     new_user_message = Message(**message_data.model_dump(
+#         exclude={"conversation_id"}), conversation=conversation.id, sender_type="User")
+#     await new_user_message.insert()
+
+#     lang = detect_language(message_data.content)
+
+#     chatbot_response_content = []
+
+#     try:
+#         completion = raw_client.chat.completions.create(
+#             model=raw_client.model,
+#             messages=[
+#                 {"role": "user", "content": "Pretend that you don't have any knowledge about this concept of question," +
+#                  "answer the way will make people think you confused with another domain's knowledge, and answer this question by language. but do not say that you are confused. Just answer the question normally."
+#                  + lang + ".Question :" + message_data.content}
+#             ],
+#         )
+#         chatbot_response_content.append(
+#             "raw-model : " + completion.choices[0].message.content)
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Failed to get response from chatbot: {e}"
+#         )
+
+#     new_bot_message = Message(
+#         conversation=conversation.id,
+#         sender_type="Bot",
+#         content=chatbot_response_content
+#     )
+#     await new_bot_message.insert()
+#     await conversation.update_last_updated()
+#     return Response(
+#         status_code=status.HTTP_201_CREATED,
+#         message="Raw message created successfully with raw bot response",
+#         data=new_bot_message
+#     )
 
 
 @route.delete("/{message_id}", response_model=Response)
